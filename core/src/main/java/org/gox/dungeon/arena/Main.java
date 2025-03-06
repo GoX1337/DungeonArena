@@ -52,8 +52,10 @@ public class Main extends ApplicationAdapter {
         remotePlayers = new HashMap<>();
         variationPositions = new ArrayList<>();
 
-        // Initialiser le joueur local même sans connexion
-        localPlayer = new PlayerData(0, Gdx.graphics.getWidth() / 2 - 128, Gdx.graphics.getHeight() / 2 - 128, "idle", "S");
+        // Initialiser le joueur local au centre de l'écran
+        float centerX = Gdx.graphics.getWidth() / 2 - 128;
+        float centerY = Gdx.graphics.getHeight() / 2 - 128;
+        localPlayer = new PlayerData(0, centerX, centerY, "idle", "S");
         localPlayer.stateTime = 0f;
         localPlayer.attackTimer = 0f;
 
@@ -73,12 +75,18 @@ public class Main extends ApplicationAdapter {
         setupNetwork();
     }
 
+    // Dans la classe Main, modifiez la méthode setupNetwork comme suit:
+
     private void setupNetwork() {
         client = new Client();
         client.start();
+
+        // S'assurer que les mêmes classes sont enregistrées que sur le serveur
         client.getKryo().register(PlayerData.class);
         client.getKryo().register(PlayerUpdate.class);
         client.getKryo().register(GameData.class);
+        client.getKryo().register(ArrayList.class);
+        client.getKryo().register(Rectangle.class);
 
         try {
             client.connect(5000, "localhost", 54555, 54777);
@@ -86,7 +94,6 @@ public class Main extends ApplicationAdapter {
             isConnected = true;
         } catch (IOException e) {
             Gdx.app.error("Client", "Erreur de connexion : " + e.getMessage());
-            // On garde le joueur local même sans connexion
             isConnected = false;
         }
 
@@ -94,29 +101,48 @@ public class Main extends ApplicationAdapter {
             @Override
             public void received(Connection connection, Object object) {
                 if (object instanceof GameData) {
+                    // Réception des données initiales du jeu
                     GameData gameData = (GameData) object;
                     localPlayer = gameData.player;
                     variationPositions = gameData.variationPositions;
-                    Gdx.app.log("Client", "Données initiales reçues : joueur " + localPlayer.id + ", " + variationPositions.size() + " variations");
+                    Gdx.app.log("Client", "Données initiales reçues : joueur " + localPlayer.id +
+                        " à position (" + localPlayer.x + ", " + localPlayer.y + ") - " +
+                        "Dimensions écran : " + Gdx.graphics.getWidth() + "x" + Gdx.graphics.getHeight());
+                    Gdx.app.log("Client", "Variations reçues : " + variationPositions.size());
                 } else if (object instanceof PlayerUpdate) {
+                    // Mise à jour d'un joueur distant
                     PlayerUpdate update = (PlayerUpdate) object;
+
                     if (update.isDisconnect) {
+                        // Un joueur s'est déconnecté
                         remotePlayers.remove(update.id);
                         Gdx.app.log("Client", "Joueur " + update.id + " déconnecté");
                     } else if (localPlayer != null && update.id != localPlayer.id) {
+                        // Mise à jour ou nouveau joueur distant
                         PlayerData player = remotePlayers.get(update.id);
                         if (player != null) {
+                            // Mettre à jour le joueur existant
                             player.x = update.x;
                             player.y = update.y;
                             player.action = update.action;
                             player.direction = update.direction;
+                            Gdx.app.log("Client", "Joueur distant " + update.id + " mis à jour à (" +
+                                update.x + ", " + update.y + ")");
                         } else {
+                            // Créer un nouveau joueur distant
                             player = new PlayerData(update.id, update.x, update.y, update.action, update.direction);
                             remotePlayers.put(update.id, player);
-                            Gdx.app.log("Client", "Nouveau joueur distant ajouté : " + update.id);
+                            Gdx.app.log("Client", "Nouveau joueur distant ajouté : " + update.id +
+                                " à position (" + update.x + ", " + update.y + ")");
                         }
                     }
                 }
+            }
+
+            @Override
+            public void disconnected(Connection connection) {
+                Gdx.app.log("Client", "Déconnecté du serveur");
+                isConnected = false;
             }
         });
     }
@@ -189,46 +215,59 @@ public class Main extends ApplicationAdapter {
 
         batch.begin();
 
-        // Dessiner le sol
+        // Calculer les décalages pour centrer le joueur
+        float offsetX = 0;
+        float offsetY = 0;
+
+        if (localPlayer != null) {
+            // Calculer le décalage nécessaire pour centrer le joueur
+            offsetX = Gdx.graphics.getWidth() / 2 - 128 - localPlayer.x;
+            offsetY = Gdx.graphics.getHeight() / 2 - 128 - localPlayer.y;
+        }
+
+        // Dessiner le sol avec décalage
         if (groundStone != null) {
             int screenWidth = Gdx.graphics.getWidth();
             int screenHeight = Gdx.graphics.getHeight();
             int tileSize = 256;
 
-            for (int x = 0; x < screenWidth; x += tileSize) {
-                for (int y = 0; y < screenHeight; y += tileSize) {
-                    batch.draw(groundStone, x, y);
+            // Calculer les limites de la zone visible
+            int startX = (int)(localPlayer.x - screenWidth/2 - tileSize) / tileSize;
+            int startY = (int)(localPlayer.y - screenHeight/2 - tileSize) / tileSize;
+            int endX = (int)(localPlayer.x + screenWidth/2 + tileSize) / tileSize + 1;
+            int endY = (int)(localPlayer.y + screenHeight/2 + tileSize) / tileSize + 1;
+
+            for (int x = startX; x <= endX; x++) {
+                for (int y = startY; y <= endY; y++) {
+                    batch.draw(groundStone, x * tileSize + offsetX, y * tileSize + offsetY);
                 }
             }
-        } else {
-            Gdx.app.error("MainGame", "Fond non dessiné : groundStone est null");
         }
 
-        // Dessiner les variations du sol
+        // Dessiner les variations du sol avec décalage
         for (int i = 0; i < variationPositions.size(); i++) {
             Rectangle pos = variationPositions.get(i);
             Texture variation = (i % 2 == 0) ? groundVariation1 : groundVariation2;
             if (variation != null) {
-                batch.draw(variation, pos.x, pos.y);
+                batch.draw(variation, pos.x + offsetX, pos.y + offsetY);
             }
         }
 
-        // Dessiner les joueurs distants
+        // Dessiner les joueurs distants avec décalage
         for (PlayerData player : remotePlayers.values()) {
-            drawPlayer(player);
+            drawPlayer(player, offsetX, offsetY);
         }
 
-        // Dessiner le joueur local
+        // Dessiner le joueur local au centre
         if (localPlayer != null) {
-            drawPlayer(localPlayer);
-            Gdx.app.debug("Player", "Joueur local position: " + localPlayer.x + ", " + localPlayer.y +
-                " action: " + localPlayer.action + " direction: " + localPlayer.direction);
+            drawPlayerCentered(localPlayer);
         }
 
         batch.end();
     }
 
-    private void drawPlayer(PlayerData player) {
+    // Modifier la méthode drawPlayer pour accepter les décalages
+    private void drawPlayer(PlayerData player, float offsetX, float offsetY) {
         String animKey = player.action + "_" + player.direction;
         // Vérifier si l'animation existe
         if (!animations.containsKey(animKey)) {
@@ -240,7 +279,32 @@ public class Main extends ApplicationAdapter {
         if (animation != null) {
             TextureRegion frame = animation.getKeyFrame(player.stateTime);
             if (frame != null && frame.getTexture() != null) {
-                batch.draw(frame, player.x, player.y, 256, 256);
+                batch.draw(frame, player.x + offsetX, player.y + offsetY, 256, 256);
+            } else {
+                Gdx.app.error("MainGame", "Frame ou texture nulle pour " + animKey);
+            }
+        } else {
+            Gdx.app.error("MainGame", "Animation nulle pour " + animKey);
+        }
+    }
+
+    // Ajouter une nouvelle méthode pour dessiner le joueur local centré
+    private void drawPlayerCentered(PlayerData player) {
+        String animKey = player.action + "_" + player.direction;
+        // Vérifier si l'animation existe
+        if (!animations.containsKey(animKey)) {
+            Gdx.app.error("MainGame", "Animation introuvable: " + animKey + ", utilisation de idle_S");
+            animKey = "idle_S"; // Fallback à l'animation par défaut
+        }
+
+        Animation<TextureRegion> animation = animations.get(animKey);
+        if (animation != null) {
+            TextureRegion frame = animation.getKeyFrame(player.stateTime);
+            if (frame != null && frame.getTexture() != null) {
+                // Dessiner le joueur au centre de l'écran
+                float centerX = Gdx.graphics.getWidth() / 2 - 128;
+                float centerY = Gdx.graphics.getHeight() / 2 - 128;
+                batch.draw(frame, centerX, centerY, 256, 256);
             } else {
                 Gdx.app.error("MainGame", "Frame ou texture nulle pour " + animKey);
             }

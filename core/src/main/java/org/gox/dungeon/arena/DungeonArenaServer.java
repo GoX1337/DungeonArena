@@ -12,18 +12,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class ServerClass {
+public class DungeonArenaServer {
+
     private Server server;
     private Map<Integer, PlayerData> players;
     private List<Rectangle> variationPositions;
 
-    public ServerClass() {
+    public DungeonArenaServer() {
         server = new Server();
         players = new HashMap<>();
         variationPositions = new ArrayList<>();
+
+        // Enregistrer toutes les classes nécessaires
         server.getKryo().register(PlayerData.class);
         server.getKryo().register(PlayerUpdate.class);
         server.getKryo().register(GameData.class);
+        server.getKryo().register(ArrayList.class);
+        server.getKryo().register(Rectangle.class);
 
         try {
             server.start();
@@ -39,18 +44,44 @@ public class ServerClass {
             @Override
             public void connected(Connection connection) {
                 System.out.println("Nouveau joueur connecté : " + connection.getID());
-                PlayerData newPlayer = new PlayerData(connection.getID(), 100, 100, "idle", "S");
+
+                // Créer un nouveau joueur au centre de l'écran
+                // On utilise des valeurs fixes pour le centre de l'écran, à adapter à votre taille d'écran
+                float startX = 400;  // Centre en X (à adapter selon la taille de votre écran)
+                float startY = 300;  // Centre en Y (à adapter selon la taille de votre écran)
+
+                PlayerData newPlayer = new PlayerData(connection.getID(), startX, startY, "idle", "S");
                 players.put(connection.getID(), newPlayer);
+
+                // Envoyer les données initiales du jeu au nouveau joueur
                 GameData gameData = new GameData(newPlayer, variationPositions);
                 connection.sendTCP(gameData);
-                broadcastPlayerUpdate(newPlayer, connection.getID());
+
+                // Envoyer tous les joueurs existants au nouveau joueur
+                for (PlayerData existingPlayer : players.values()) {
+                    if (existingPlayer.id != connection.getID()) {
+                        connection.sendTCP(new PlayerUpdate(existingPlayer));
+                    }
+                }
+
+                // Annoncer le nouveau joueur à tous les autres joueurs
+                broadcastNewPlayer(newPlayer, connection.getID());
+                System.out.println("Joueur " + connection.getID() + " initialisé à la position (" +
+                    startX + ", " + startY + ")");
             }
 
             @Override
             public void disconnected(Connection connection) {
                 System.out.println("Joueur déconnecté : " + connection.getID());
                 players.remove(connection.getID());
-                broadcastPlayerUpdate(null, connection.getID());
+
+                // Créer une mise à jour de déconnexion
+                PlayerUpdate disconnectUpdate = new PlayerUpdate();
+                disconnectUpdate.id = connection.getID();
+                disconnectUpdate.isDisconnect = true;
+
+                // Annoncer la déconnexion à tous les autres joueurs
+                server.sendToAllTCP(disconnectUpdate);
             }
 
             @Override
@@ -63,7 +94,12 @@ public class ServerClass {
                         player.y = update.y;
                         player.action = update.action;
                         player.direction = update.direction;
-                        broadcastPlayerUpdate(player, connection.getID());
+
+                        // Créer une nouvelle mise à jour avec l'ID serveur
+                        PlayerUpdate serverUpdate = new PlayerUpdate(player);
+
+                        // Envoyer la mise à jour à tous les autres joueurs
+                        broadcastPlayerUpdate(serverUpdate, connection.getID());
                     }
                 }
             }
@@ -71,8 +107,8 @@ public class ServerClass {
     }
 
     private void placeGroundVariations() {
-        int screenWidth = 800;  // Remplace par la largeur de ton écran
-        int screenHeight = 600; // Remplace par la hauteur de ton écran
+        int screenWidth = 800;  // Taille de l'écran
+        int screenHeight = 600; // Taille de l'écran
         int tileSize = 256;
         int maxVariations = 10;
 
@@ -106,15 +142,25 @@ public class ServerClass {
         System.out.println("Variations placées : " + variationPositions.size());
     }
 
-    private void broadcastPlayerUpdate(PlayerData player, int excludeId) {
+    private void broadcastNewPlayer(PlayerData player, int sourceId) {
+        PlayerUpdate update = new PlayerUpdate(player);
         for (Connection conn : server.getConnections()) {
-            if (conn.getID() != excludeId) {
-                conn.sendTCP(player != null ? new PlayerUpdate(player) : new PlayerUpdate(excludeId));
+            if (conn.getID() != sourceId) {
+                conn.sendTCP(update);
+                System.out.println("Nouveau joueur " + player.id + " annoncé au joueur " + conn.getID());
+            }
+        }
+    }
+
+    private void broadcastPlayerUpdate(PlayerUpdate update, int sourceId) {
+        for (Connection conn : server.getConnections()) {
+            if (conn.getID() != sourceId) {
+                conn.sendTCP(update);
             }
         }
     }
 
     public static void main(String[] args) {
-        new ServerClass();
+        new DungeonArenaServer();
     }
 }
