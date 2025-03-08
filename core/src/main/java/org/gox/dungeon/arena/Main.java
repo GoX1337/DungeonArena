@@ -75,8 +75,6 @@ public class Main extends ApplicationAdapter {
         setupNetwork();
     }
 
-    // Dans la classe Main, modifiez la méthode setupNetwork comme suit:
-
     private void setupNetwork() {
         client = new Client();
         client.start();
@@ -158,7 +156,7 @@ public class Main extends ApplicationAdapter {
                     String angle = directionAngles.get(direction);
 
                     for (int i = 0; i < frameCount; i++) {
-                        String fileName = action + "/" + direction + "/knight_armed_" + action + "_" + direction + "_" + angle + "_" + i + ".png";
+                        String fileName = "knight/" + action + "/" + direction + "/knight_armed_" + action + "_" + direction + "_" + angle + "_" + i + ".png";
                         try {
                             Texture texture = new Texture(Gdx.files.internal(fileName));
                             frames[i] = new TextureRegion(texture, 0, 0, 256, 256);
